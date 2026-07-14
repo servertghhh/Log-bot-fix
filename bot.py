@@ -17,7 +17,7 @@ DEFAULT_CHANNEL_USERNAME = "@your_channel"
 DEFAULT_CHANNEL_LINK = "https://t.me/your_channel"
 DEV_NAME = "NOOBXVAU"
 DEV_TELEGRAM = "@noobxvau"
-DEV_GITHUB = "https://github.com/noobxvau"
+DEV_GITHUB = "https://youtube.com/@thenoobcoder0"
 BOT_NAME = "NHBD LOG HUNT"
 
 # ============ ইমোজি ============
