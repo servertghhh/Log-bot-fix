@@ -304,28 +304,29 @@ def send_verification_request(message):
 def coin_display(user_id):
     return f"{EMOJI['coins']} কয়েন: {get_coins(user_id)}"
 
-# ============ ডাটা পার্সার - নতুন ============
-def extract_credentials(text):
-    """শুধু ইউজারনেম:পাসওয়ার্ড বের করে - গোছানো ফরম্যাটে"""
+# ============ ডাটা পার্সার - Owner বাদ ============
+def extract_all_data(text):
+    """Owner বাদ দিয়ে বাকি সব ডাটা নেয়"""
     lines = text.split('\n')
-    credentials = []
+    data_list = []
     current_url = None
     
     for line in lines:
-        if len(credentials) >= 10:
+        if len(data_list) >= 20:
             break
             
         line = line.strip()
         if not line:
             continue
         
-        # URL চেক
-        if line.startswith('http://') or line.startswith('https://'):
-            current_url = line
+        # Owner বাদ
+        if line.lower().startswith('owner:'):
             continue
         
-        # "Owner:" বাদ
-        if line.lower().startswith('owner:'):
+        # URL ধরবো
+        if line.startswith('http://') or line.startswith('https://'):
+            current_url = line
+            data_list.append({'type': 'url', 'value': line})
             continue
         
         # ইউজারনেম:পাসওয়ার্ড ফরম্যাট
@@ -334,21 +335,21 @@ def extract_credentials(text):
             if len(parts) >= 2:
                 username = parts[0].strip()
                 password = ':'.join(parts[1:]).strip()
-                
-                # ফিল্টার - বাদ দেওয়ার লিস্ট
-                skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email', 'https', 'http']
-                if username.lower() in skip_words:
-                    continue
-                
-                if username and password and len(username) > 1 and len(password) > 1:
-                    credentials.append({
-                        'url': current_url if current_url else '',
+                if username and password:
+                    data_list.append({
+                        'type': 'credential',
                         'username': username,
-                        'password': password
+                        'password': password,
+                        'url': current_url if current_url else ''
                     })
-                    current_url = None  # রিসেট
+                    current_url = None
+                    continue
+        
+        # অন্য সব কিছু
+        if line:
+            data_list.append({'type': 'text', 'value': line})
     
-    return credentials
+    return data_list
 
 # ============ API কল ============
 def call_api(url=None):
@@ -375,45 +376,42 @@ def call_api(url=None):
             # JSON চেষ্টা
             try:
                 data = json.loads(content)
-                if data and data.get('status') == 'success':
-                    results = data.get('data', [])
-                    if results:
-                        credentials = []
-                        current_url = None
-                        for item in results:
-                            if len(credentials) >= 10:
-                                break
-                            if isinstance(item, str):
-                                if item.startswith('http://') or item.startswith('https://'):
-                                    current_url = item
-                                    continue
-                                if ':' in item:
-                                    parts = item.split(':')
-                                    if len(parts) >= 2:
-                                        username = parts[0].strip()
-                                        password = ':'.join(parts[1:]).strip()
-                                        skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email']
-                                        if username.lower() not in skip_words and username and password:
-                                            credentials.append({
-                                                'url': current_url if current_url else '',
-                                                'username': username,
-                                                'password': password
+                if data:
+                    results = []
+                    if data.get('status') == 'success':
+                        items = data.get('data', [])
+                        if items:
+                            for item in items[:20]:
+                                if isinstance(item, str):
+                                    # Owner বাদ
+                                    if item.lower().startswith('owner:'):
+                                        continue
+                                    if ':' in item:
+                                        parts = item.split(':')
+                                        if len(parts) >= 2:
+                                            results.append({
+                                                'type': 'credential',
+                                                'username': parts[0].strip(),
+                                                'password': ':'.join(parts[1:]).strip()
                                             })
-                                            current_url = None
-                        if credentials:
-                            random.shuffle(credentials)
-                            return {'status': 'success', 'data': credentials}
-                        else:
-                            return {'status': 'success', 'data': []}
-                    return {'status': 'success', 'data': []}
+                                    else:
+                                        results.append({'type': 'text', 'value': item})
+                            if results:
+                                random.shuffle(results)
+                                return {'status': 'success', 'data': results[:20]}
+                    return {'status': 'success', 'data': results}
             except:
                 pass
             
             # টেক্সট পার্স
-            credentials = extract_credentials(content)
-            if credentials:
-                random.shuffle(credentials)
-                return {'status': 'success', 'data': credentials[:10]}
+            all_data = extract_all_data(content)
+            if all_data:
+                credentials = [d for d in all_data if d.get('type') == 'credential']
+                if credentials:
+                    random.shuffle(credentials)
+                    return {'status': 'success', 'data': credentials[:20]}
+                else:
+                    return {'status': 'success', 'data': all_data[:20]}
             else:
                 return {'status': 'error', 'message': 'কোন ডেটা পাওয়া যায়নি', 'data': []}
         else:
@@ -748,10 +746,15 @@ def handle_text(message):
                     response = f"{EMOJI['latest']} <b>লেটেস্ট ডেটা:</b>\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            if item.get('url'):
-                                response += f"{i}. <b>URL:</b> {item['url']}\n"
-                            response += f"   <b>Username:</b> {item['username']}\n"
-                            response += f"   <b>Password:</b> {item['password']}\n\n"
+                            if item.get('type') == 'credential':
+                                if item.get('url'):
+                                    response += f"{i}. <b>URL:</b> {item['url']}\n"
+                                response += f"   <b>Username:</b> {item['username']}\n"
+                                response += f"   <b>Password:</b> {item['password']}\n\n"
+                            elif item.get('type') == 'url':
+                                response += f"{i}. <b>URL:</b> {item['value']}\n\n"
+                            else:
+                                response += f"{i}. {item.get('value', '')}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -828,10 +831,15 @@ def handle_text(message):
                     response = f"{EMOJI['success']} সফল!\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            if item.get('url'):
-                                response += f"{i}. <b>URL:</b> {item['url']}\n"
-                            response += f"   <b>Username:</b> {item['username']}\n"
-                            response += f"   <b>Password:</b> {item['password']}\n\n"
+                            if item.get('type') == 'credential':
+                                if item.get('url'):
+                                    response += f"{i}. <b>URL:</b> {item['url']}\n"
+                                response += f"   <b>Username:</b> {item['username']}\n"
+                                response += f"   <b>Password:</b> {item['password']}\n\n"
+                            elif item.get('type') == 'url':
+                                response += f"{i}. <b>URL:</b> {item['value']}\n\n"
+                            else:
+                                response += f"{i}. {item.get('value', '')}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -949,8 +957,8 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 শুধু ১০টি ডেটা দেখাবে")
-    print("📌 গোছানো ফরম্যাটে: URL, Username, Password")
+    print("📌 Owner ট্যাগ বাদ দেওয়া হয়েছে")
+    print("📌 বাকি সব ডেটা দেখাবে")
     print(f"{'='*50}\n")
     
     try:
