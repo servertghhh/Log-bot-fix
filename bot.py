@@ -304,11 +304,13 @@ def send_verification_request(message):
 def coin_display(user_id):
     return f"{EMOJI['coins']} কয়েন: {get_coins(user_id)}"
 
-# ============ ডাটা পার্সার (ফিক্সড) ============
+# ============ ডাটা পার্সার ============
 def extract_credentials(text):
-    """শুধু ইউজারনেম:পাসওয়ার্ড বের করে - গোছানো ফরম্যাটে"""
-    lines = text.split('\n')
+    """শুধু ইউজারনেম:পাসওয়ার্ড বের করে"""
     credentials = []
+    
+    # লাইন দ্বারা লাইন পার্স
+    lines = text.split('\n')
     
     for line in lines:
         if len(credentials) >= 10:
@@ -322,40 +324,32 @@ def extract_credentials(text):
         if line.lower().startswith('owner:'):
             continue
         
-        # ইউজারনেম:পাসওয়ার্ড ফরম্যাট
+        # ইউজারনেম:পাসওয়ার্ড খোঁজা
         if ':' in line:
+            # লাইনটি split করি
             parts = line.split(':')
             if len(parts) >= 2:
-                # প্রথম অংশ ইউজারনেম, বাকি সব পাসওয়ার্ড
                 username = parts[0].strip()
                 password = ':'.join(parts[1:]).strip()
                 
-                # ফিল্টার - শুধু মেইল বা ইউজারনেম ধরবে
-                if username and password and len(username) > 1 and len(password) > 1:
-                    # "Pass" বা "Url" বাদ
-                    if username.lower() in ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password']:
+                # ফিল্টার
+                if username and password:
+                    # বাদ দেওয়ার লিস্ট
+                    skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email']
+                    if username.lower() in skip_words:
                         continue
                     
-                    # চেক করুন ইউজারনেম টাইপ
-                    if '@' in username:
-                        # ইমেইল ইউজারনেম
+                    # ভালো ইউজারনেম চেক
+                    if len(username) > 2 and len(password) > 1:
                         credentials.append({
                             'username': username,
-                            'password': password,
-                            'type': 'email'
-                        })
-                    else:
-                        credentials.append({
-                            'username': username,
-                            'password': password,
-                            'type': 'normal'
+                            'password': password
                         })
     
     return credentials
 
 # ============ API কল ============
 def call_api(url=None):
-    """API থেকে ডেটা আনে"""
     try:
         params = {}
         if url:
@@ -391,12 +385,13 @@ def call_api(url=None):
                                 if len(parts) >= 2:
                                     username = parts[0].strip()
                                     password = ':'.join(parts[1:]).strip()
-                                    if username and password and username.lower() not in ['pass', 'url', 'username', 'user']:
-                                        credentials.append({
-                                            'username': username,
-                                            'password': password,
-                                            'type': 'normal'
-                                        })
+                                    if username and password:
+                                        skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email']
+                                        if username.lower() not in skip_words:
+                                            credentials.append({
+                                                'username': username,
+                                                'password': password
+                                            })
                         if credentials:
                             random.shuffle(credentials)
                             return {'status': 'success', 'data': credentials}
@@ -745,7 +740,7 @@ def handle_text(message):
                     response = f"{EMOJI['latest']} <b>লেটেস্ট ইউজারনেম:পাসওয়ার্ড:</b>\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            response += f"{i}. <b>Username:</b> {item['username']}\n    <b>Password:</b> {item['password']}\n\n"
+                            response += f"{i}. <b>Username:</b> {item['username']}\n   <b>Password:</b> {item['password']}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -822,7 +817,7 @@ def handle_text(message):
                     response = f"{EMOJI['success']} সফল!\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            response += f"{i}. <b>Username:</b> {item['username']}\n    <b>Password:</b> {item['password']}\n\n"
+                            response += f"{i}. <b>Username:</b> {item['username']}\n   <b>Password:</b> {item['password']}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
