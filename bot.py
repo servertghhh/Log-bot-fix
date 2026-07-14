@@ -304,17 +304,14 @@ def send_verification_request(message):
 def coin_display(user_id):
     return f"{EMOJI['coins']} কয়েন: {get_coins(user_id)}"
 
-# ============ ডাটা পার্সার - সঠিক ফরম্যাট ============
+# ============ ডাটা পার্সার - র্যান্ডম ফিক্স ============
 def extract_credentials(text):
-    """সঠিকভাবে ইউজারনেম, পাসওয়ার্ড, URL আলাদা করে"""
+    """সঠিকভাবে ইউজারনেম, পাসওয়ার্ড, URL আলাদা করে - সব ডাটা নেয়"""
     lines = text.split('\n')
-    credentials = []
+    all_credentials = []
     current_data = {}
     
     for line in lines:
-        if len(credentials) >= 20:
-            break
-            
         line = line.strip()
         if not line:
             continue
@@ -344,9 +341,9 @@ def extract_credentials(text):
                 current_data['url'] = url
             continue
         
-        # যদি ইউজারনেম এবং পাসওয়ার্ড দুইটাই থাকে
+        # যদি ইউজারনেম এবং পাসওয়ার্ড দুইটাই থাকে - সেভ করি
         if current_data.get('username') and current_data.get('password'):
-            credentials.append({
+            all_credentials.append({
                 'username': current_data['username'],
                 'password': current_data['password'],
                 'url': current_data.get('url', '')
@@ -355,13 +352,22 @@ def extract_credentials(text):
     
     # শেষেরটা চেক
     if current_data.get('username') and current_data.get('password'):
-        credentials.append({
+        all_credentials.append({
             'username': current_data['username'],
             'password': current_data['password'],
             'url': current_data.get('url', '')
         })
     
-    return credentials
+    # ডুপ্লিকেট বাদ
+    seen = set()
+    unique_credentials = []
+    for cred in all_credentials:
+        key = (cred['username'], cred['password'])
+        if key not in seen:
+            seen.add(key)
+            unique_credentials.append(cred)
+    
+    return unique_credentials
 
 # ============ API কল ============
 def call_api(url=None):
@@ -394,7 +400,7 @@ def call_api(url=None):
                         items = data.get('data', [])
                         if items:
                             current = {}
-                            for item in items[:30]:
+                            for item in items:
                                 if isinstance(item, str):
                                     if item.lower().startswith('owner:'):
                                         continue
@@ -412,9 +418,19 @@ def call_api(url=None):
                                             'url': current.get('url', '')
                                         })
                                         current = {}
-                            if results:
-                                random.shuffle(results)
-                                return {'status': 'success', 'data': results[:20]}
+                            
+                            # ডুপ্লিকেট বাদ
+                            seen = set()
+                            unique_results = []
+                            for r in results:
+                                key = (r['username'], r['password'])
+                                if key not in seen:
+                                    seen.add(key)
+                                    unique_results.append(r)
+                            
+                            if unique_results:
+                                random.shuffle(unique_results)
+                                return {'status': 'success', 'data': unique_results[:20]}
                     return {'status': 'success', 'data': results}
             except:
                 pass
@@ -961,7 +977,7 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 সঠিক ফরম্যাটে দেখাবে: Username, Password, URL")
+    print("📌 ডুপ্লিকেট বাদ দিয়ে র্যান্ডম ডাটা দেখাবে")
     print(f"{'='*50}\n")
     
     try:
