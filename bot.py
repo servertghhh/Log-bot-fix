@@ -872,10 +872,10 @@ def handle_text(message):
         text = f"""
 {EMOJI['developer']} <b>ডেভেলপার</b>
 
-বট: {BOT_NAME}
-ডেভেলপার: {DEV_NAME}
-টেলিগ্রাম: {DEV_TELEGRAM}
-গিটহাব: {DEV_GITHUB}
+BOT : {BOT_NAME}
+DEVELPPER : {DEV_NAME}
+TELEGRAM : {DEV_TELEGRAM}
+YOUTUBE : {DEV_GITHUB}
         """
         bot.reply_to(message, text, parse_mode='HTML', reply_markup=get_permanent_keyboard(user_id))
         return
@@ -984,7 +984,7 @@ def callback_handler(call):
                 parse_mode='HTML')
             bot.send_message(user_id, "মেইন মেনু:", reply_markup=get_permanent_keyboard(user_id))
         else:
-            bot.answer_callback_query(call.id, "চ্যানেল জয়েন করেননি!", show_alert=True)
+            bot.answer_callback_query(call.id, "বাইনসোদ আগে চ্যানেলে জয়েন কর 🫤", show_alert=True)
     
     elif call.data == "new_search":
         bot.answer_callback_query(call.id, "🔍 ইউআরএল দিন!")
