@@ -34,6 +34,8 @@ EMOJI = {
 def init_db():
     conn = sqlite3.connect('bot_database.db')
     c = conn.cursor()
+    
+    # ইউজার টেবিল
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -46,6 +48,8 @@ def init_db():
         is_banned INTEGER DEFAULT 0,
         total_searches INTEGER DEFAULT 0
     )''')
+    
+    # রেফারেল টেবিল
     c.execute('''CREATE TABLE IF NOT EXISTS referrals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         referrer_id INTEGER,
@@ -53,6 +57,8 @@ def init_db():
         refer_date TIMESTAMP,
         is_valid INTEGER DEFAULT 0
     )''')
+    
+    # সার্চ হিস্টোরি
     c.execute('''CREATE TABLE IF NOT EXISTS search_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -60,6 +66,8 @@ def init_db():
         search_date TIMESTAMP,
         coins_used INTEGER DEFAULT 1
     )''')
+    
+    # অ্যাডমিন লগ
     c.execute('''CREATE TABLE IF NOT EXISTS admin_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         admin_id INTEGER,
@@ -68,11 +76,25 @@ def init_db():
         details TEXT,
         log_date TIMESTAMP
     )''')
+    
+    # চ্যানেল সেটিংস
     c.execute('''CREATE TABLE IF NOT EXISTS channel_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         setting_key TEXT UNIQUE,
         setting_value TEXT
     )''')
+    
+    # ===== নতুন: ইউজারের দেখা ডাটা ট্র্যাক =====
+    c.execute('''CREATE TABLE IF NOT EXISTS user_seen_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT,
+        password TEXT,
+        url TEXT,
+        seen_date TIMESTAMP,
+        UNIQUE(user_id, username, password)
+    )''')
+    
     c.execute("INSERT OR IGNORE INTO channel_settings (setting_key, setting_value) VALUES (?, ?)", 
               ('channel_username', DEFAULT_CHANNEL_USERNAME))
     c.execute("INSERT OR IGNORE INTO channel_settings (setting_key, setting_value) VALUES (?, ?)", 
@@ -249,6 +271,51 @@ def verify_referral(user_id):
     conn.close()
     return False, None
 
+# ============ নতুন: ইউজারের দেখা ডাটা ট্র্যাক ============
+def save_seen_data(user_id, username, password, url=""):
+    """ইউজারের দেখা ডাটা সেভ করে"""
+    try:
+        conn = sqlite3.connect('bot_database.db')
+        c = conn.cursor()
+        c.execute("""INSERT OR IGNORE INTO user_seen_data (user_id, username, password, url, seen_date) 
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (user_id, username, password, url, datetime.datetime.now()))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ সেভ করতে ব্যর্থ: {e}")
+        return False
+
+def get_seen_data(user_id):
+    """ইউজারের দেখা ডাটা লিস্ট নেয়"""
+    try:
+        conn = sqlite3.connect('bot_database.db')
+        c = conn.cursor()
+        c.execute("SELECT username, password FROM user_seen_data WHERE user_id = ?", (user_id,))
+        results = c.fetchall()
+        conn.close()
+        seen_set = set()
+        for r in results:
+            seen_set.add((r[0], r[1]))
+        return seen_set
+    except Exception as e:
+        print(f"❌ দেখা ডাটা পেতে ব্যর্থ: {e}")
+        return set()
+
+def clear_seen_data(user_id):
+    """ইউজারের দেখা ডাটা ক্লিয়ার করে"""
+    try:
+        conn = sqlite3.connect('bot_database.db')
+        c = conn.cursor()
+        c.execute("DELETE FROM user_seen_data WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ ক্লিয়ার করতে ব্যর্থ: {e}")
+        return False
+
 # ============ বট ============
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 logging.basicConfig(level=logging.INFO)
@@ -318,26 +385,21 @@ def extract_all_credentials(text):
         if not line:
             continue
         
-        # Owner বাদ
         if line.lower().startswith('owner:'):
             continue
         
-        # Username: দিয়ে শুরু হলে
         if line.startswith('Username:'):
             current_username = line.replace('Username:', '').strip()
             continue
         
-        # Pass: দিয়ে শুরু হলে
         if line.startswith('Pass:'):
             current_password = line.replace('Pass:', '').strip()
             continue
         
-        # Url: দিয়ে শুরু হলে
         if line.startswith('Url:'):
             current_url = line.replace('Url:', '').strip()
             continue
         
-        # যদি Username এবং Pass দুইটাই থাকে
         if current_username and current_password:
             all_credentials.append({
                 'username': current_username,
@@ -348,7 +410,6 @@ def extract_all_credentials(text):
             current_password = None
             current_url = None
     
-    # শেষেরটা চেক
     if current_username and current_password:
         all_credentials.append({
             'username': current_username,
@@ -359,7 +420,8 @@ def extract_all_credentials(text):
     return all_credentials
 
 # ============ API কল ============
-def call_api(url=None):
+def call_api(user_id, url=None):
+    """API থেকে ডেটা আনে - ইউজারের দেখা ডাটা বাদ দিয়ে"""
     try:
         params = {}
         if url:
@@ -415,7 +477,7 @@ def call_api(url=None):
             except:
                 pass
             
-            # টেক্সট পার্স (যদি JSON না কাজ করে)
+            # টেক্সট পার্স
             if not all_credentials:
                 all_credentials = extract_all_credentials(content)
             
@@ -428,12 +490,32 @@ def call_api(url=None):
                     seen.add(key)
                     unique_credentials.append(cred)
             
-            if unique_credentials:
-                # র্যান্ডম শাফল করে ২০টা নিবে
-                random.shuffle(unique_credentials)
-                return {'status': 'success', 'data': unique_credentials[:20]}
+            # ===== ইউজারের দেখা ডাটা বাদ =====
+            seen_data = get_seen_data(user_id)
+            new_credentials = []
+            for cred in unique_credentials:
+                key = (cred['username'], cred['password'])
+                if key not in seen_data:
+                    new_credentials.append(cred)
+            
+            print(f"📊 মোট ডাটা: {len(unique_credentials)}, নতুন ডাটা: {len(new_credentials)}")
+            
+            if new_credentials:
+                # র্যান্ডম শাফল
+                random.shuffle(new_credentials)
+                # ২০টা নিবে
+                result_data = new_credentials[:20]
+                
+                # ডাটা সেভ করুন
+                for cred in result_data:
+                    save_seen_data(user_id, cred['username'], cred['password'], cred.get('url', ''))
+                
+                return {'status': 'success', 'data': result_data}
             else:
-                return {'status': 'error', 'message': 'কোন ডেটা পাওয়া যায়নি', 'data': []}
+                # যদি নতুন ডাটা না থাকে, পুরানো ক্লিয়ার করে নতুন করে দেখান
+                clear_seen_data(user_id)
+                # আবার কল করুন
+                return call_api(user_id, url)
         else:
             return {'status': 'error', 'message': f'HTTP {response.status_code}', 'data': []}
             
@@ -758,7 +840,7 @@ def handle_text(message):
         if use_coins(user_id, 1):
             msg = bot.reply_to(message, f"{EMOJI['loading']} ডেটা আনতে হচ্ছে...", parse_mode='HTML')
             
-            data = call_api()
+            data = call_api(user_id)  # ইউজার আইডি পাঠাচ্ছি
             
             if data and data.get('status') == 'success':
                 results = data.get('data', [])
@@ -839,7 +921,7 @@ def handle_text(message):
             url = urls[0]
             msg = bot.reply_to(message, f"{EMOJI['loading']} প্রসেসিং...\n<code>{url}</code>", parse_mode='HTML')
             
-            data = call_api(url)
+            data = call_api(user_id, url)  # ইউজার আইডি এবং ইউআরএল পাঠাচ্ছি
             
             if data and data.get('status') == 'success':
                 results = data.get('data', [])
@@ -961,6 +1043,17 @@ def unban_command(message):
     except:
         bot.reply_to(message, "❌ /unban [আইডি]", reply_markup=get_permanent_keyboard(message.from_user.id))
 
+@bot.message_handler(commands=['clearseen'])
+def clear_seen_command(message):
+    """ইউজারের দেখা ডাটা ক্লিয়ার করে"""
+    user_id = message.from_user.id
+    if clear_seen_data(user_id):
+        bot.reply_to(message, f"{EMOJI['success']} আপনার দেখা ডাটা ক্লিয়ার করা হয়েছে! এখন নতুন ডাটা দেখাবে।", 
+                    reply_markup=get_permanent_keyboard(user_id))
+    else:
+        bot.reply_to(message, f"{EMOJI['error']} ক্লিয়ার করতে ব্যর্থ হয়েছে!", 
+                    reply_markup=get_permanent_keyboard(user_id))
+
 # ============ মেইন ============
 def main():
     print(f"\n{'='*50}")
@@ -969,7 +1062,9 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 সব ডাটা থেকে ডুপ্লিকেট বাদ দিয়ে র্যান্ডম দেখাবে")
+    print("📌 প্রতিটি ইউজারের জন্য আলাদা ডাটা ট্র্যাক করা হয়")
+    print("📌 আগে দেখা ডাটা আবার দেখাবে না")
+    print("📌 /clearseen দিয়ে ডাটা রিসেট করা যায়")
     print(f"{'='*50}\n")
     
     try:
