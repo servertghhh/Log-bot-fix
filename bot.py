@@ -409,7 +409,7 @@ def extract_all_credentials(text):
     
     return all_credentials
 
-# ============ API কল - টাইমআউট ফিক্স ============
+# ============ API কল - ডাইরেক্ট টেস্ট ============
 def call_api(user_id, url=None):
     try:
         params = {}
@@ -417,25 +417,26 @@ def call_api(user_id, url=None):
             params['url'] = url
         
         print(f"📡 কল হচ্ছে: {API_URL}")
+        print(f"📦 প্যারামিটার: {params}")
         
-        # টাইমআউট কমিয়ে ১০ সেকেন্ড
-        response = requests.get(API_URL, params=params, timeout=10)
+        # ডাইরেক্ট রিকোয়েস্ট - টাইমআউট 5 সেকেন্ড
+        response = requests.get(API_URL, params=params, timeout=5)
         
         print(f"📊 স্ট্যাটাস: {response.status_code}")
         
         if response.status_code == 200:
             content = response.text
-            
             print(f"📄 রেসপন্স লেন্থ: {len(content)} অক্ষর")
-            
-            all_credentials = []
+            print(f"📄 রেসপন্সের প্রথম 200 অক্ষর: {content[:200]}")
             
             # JSON চেষ্টা
             try:
                 data = response.json()
+                print(f"✅ JSON ডেটা: {data}")
                 if data and data.get('status') == 'success':
                     items = data.get('data', [])
                     if items:
+                        all_credentials = []
                         current_username = None
                         current_password = None
                         current_url = None
@@ -460,49 +461,65 @@ def call_api(user_id, url=None):
                                     current_username = None
                                     current_password = None
                                     current_url = None
-            except:
-                pass
-            
-            # টেক্সট পার্স
-            if not all_credentials:
+                        
+                        if all_credentials:
+                            # ডুপ্লিকেট বাদ
+                            seen = set()
+                            unique_credentials = []
+                            for cred in all_credentials:
+                                key = (cred['username'], cred['password'])
+                                if key not in seen:
+                                    seen.add(key)
+                                    unique_credentials.append(cred)
+                            
+                            # ইউজারের দেখা ডাটা বাদ
+                            seen_data = get_seen_data(user_id)
+                            new_credentials = []
+                            for cred in unique_credentials:
+                                key = (cred['username'], cred['password'])
+                                if key not in seen_data:
+                                    new_credentials.append(cred)
+                            
+                            print(f"📊 মোট ডাটা: {len(unique_credentials)}, নতুন ডাটা: {len(new_credentials)}")
+                            
+                            if new_credentials:
+                                random.shuffle(new_credentials)
+                                result_data = new_credentials[:20]
+                                
+                                for cred in result_data:
+                                    save_seen_data(user_id, cred['username'], cred['password'], cred.get('url', ''))
+                                
+                                return {'status': 'success', 'data': result_data}
+                            else:
+                                clear_seen_data(user_id)
+                                return call_api(user_id, url)
+                        else:
+                            return {'status': 'error', 'message': 'কোন ডাটা পাওয়া যায়নি', 'data': []}
+                    else:
+                        return {'status': 'error', 'message': 'কোন আইটেম নেই', 'data': []}
+                else:
+                    return {'status': 'error', 'message': 'API status সফল নয়', 'data': []}
+            except Exception as e:
+                print(f"❌ JSON পার্স করতে ব্যর্থ: {e}")
+                # টেক্সট পার্স
                 all_credentials = extract_all_credentials(content)
-            
-            # ডুপ্লিকেট বাদ
-            seen = set()
-            unique_credentials = []
-            for cred in all_credentials:
-                key = (cred['username'], cred['password'])
-                if key not in seen:
-                    seen.add(key)
-                    unique_credentials.append(cred)
-            
-            # ইউজারের দেখা ডাটা বাদ
-            seen_data = get_seen_data(user_id)
-            new_credentials = []
-            for cred in unique_credentials:
-                key = (cred['username'], cred['password'])
-                if key not in seen_data:
-                    new_credentials.append(cred)
-            
-            print(f"📊 মোট ডাটা: {len(unique_credentials)}, নতুন ডাটা: {len(new_credentials)}")
-            
-            if new_credentials:
-                random.shuffle(new_credentials)
-                result_data = new_credentials[:20]
-                
-                for cred in result_data:
-                    save_seen_data(user_id, cred['username'], cred['password'], cred.get('url', ''))
-                
-                return {'status': 'success', 'data': result_data}
-            else:
-                clear_seen_data(user_id)
-                return call_api(user_id, url)
+                if all_credentials:
+                    random.shuffle(all_credentials)
+                    result_data = all_credentials[:20]
+                    for cred in result_data:
+                        save_seen_data(user_id, cred['username'], cred['password'], cred.get('url', ''))
+                    return {'status': 'success', 'data': result_data}
+                else:
+                    return {'status': 'error', 'message': 'পার্স করতে ব্যর্থ', 'data': []}
         else:
             return {'status': 'error', 'message': f'HTTP {response.status_code}', 'data': []}
             
     except requests.exceptions.Timeout:
         print("❌ টাইমআউট!")
         return {'status': 'error', 'message': 'টাইমআউট! আবার চেষ্টা করুন', 'data': []}
+    except requests.exceptions.ConnectionError:
+        print("❌ কানেকশন এরর!")
+        return {'status': 'error', 'message': 'কানেকশন সমস্যা! নেট চেক করুন', 'data': []}
     except Exception as e:
         print(f"❌ Error: {e}")
         return {'status': 'error', 'message': str(e), 'data': []}
@@ -1042,9 +1059,7 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 প্রতিটি ইউজারের জন্য আলাদা ডাটা ট্র্যাক করা হয়")
-    print("📌 আগে দেখা ডাটা আবার দেখাবে না")
-    print("📌 /clearseen দিয়ে ডাটা রিসেট করা যায়")
+    print("📌 ডিবাগ মোড চালু আছে - টার্মিনাল দেখুন")
     print(f"{'='*50}\n")
     
     try:
