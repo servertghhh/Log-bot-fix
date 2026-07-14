@@ -304,15 +304,15 @@ def send_verification_request(message):
 def coin_display(user_id):
     return f"{EMOJI['coins']} কয়েন: {get_coins(user_id)}"
 
-# ============ ডাটা পার্সার - Owner বাদ ============
-def extract_all_data(text):
-    """Owner বাদ দিয়ে বাকি সব ডাটা নেয়"""
+# ============ ডাটা পার্সার - সঠিক ফরম্যাট ============
+def extract_credentials(text):
+    """সঠিকভাবে ইউজারনেম, পাসওয়ার্ড, URL আলাদা করে"""
     lines = text.split('\n')
-    data_list = []
-    current_url = None
+    credentials = []
+    current_data = {}
     
     for line in lines:
-        if len(data_list) >= 20:
+        if len(credentials) >= 20:
             break
             
         line = line.strip()
@@ -323,33 +323,45 @@ def extract_all_data(text):
         if line.lower().startswith('owner:'):
             continue
         
-        # URL ধরবো
-        if line.startswith('http://') or line.startswith('https://'):
-            current_url = line
-            data_list.append({'type': 'url', 'value': line})
+        # "Username:" দিয়ে শুরু হলে
+        if line.startswith('Username:'):
+            username = line.replace('Username:', '').strip()
+            if username:
+                current_data['username'] = username
             continue
         
-        # ইউজারনেম:পাসওয়ার্ড ফরম্যাট
-        if ':' in line:
-            parts = line.split(':')
-            if len(parts) >= 2:
-                username = parts[0].strip()
-                password = ':'.join(parts[1:]).strip()
-                if username and password:
-                    data_list.append({
-                        'type': 'credential',
-                        'username': username,
-                        'password': password,
-                        'url': current_url if current_url else ''
-                    })
-                    current_url = None
-                    continue
+        # "Pass:" দিয়ে শুরু হলে
+        if line.startswith('Pass:'):
+            password = line.replace('Pass:', '').strip()
+            if password:
+                current_data['password'] = password
+            continue
         
-        # অন্য সব কিছু
-        if line:
-            data_list.append({'type': 'text', 'value': line})
+        # "Url:" দিয়ে শুরু হলে
+        if line.startswith('Url:'):
+            url = line.replace('Url:', '').strip()
+            if url:
+                current_data['url'] = url
+            continue
+        
+        # যদি ইউজারনেম এবং পাসওয়ার্ড দুইটাই থাকে
+        if current_data.get('username') and current_data.get('password'):
+            credentials.append({
+                'username': current_data['username'],
+                'password': current_data['password'],
+                'url': current_data.get('url', '')
+            })
+            current_data = {}
     
-    return data_list
+    # শেষেরটা চেক
+    if current_data.get('username') and current_data.get('password'):
+        credentials.append({
+            'username': current_data['username'],
+            'password': current_data['password'],
+            'url': current_data.get('url', '')
+        })
+    
+    return credentials
 
 # ============ API কল ============
 def call_api(url=None):
@@ -381,21 +393,25 @@ def call_api(url=None):
                     if data.get('status') == 'success':
                         items = data.get('data', [])
                         if items:
-                            for item in items[:20]:
+                            current = {}
+                            for item in items[:30]:
                                 if isinstance(item, str):
-                                    # Owner বাদ
                                     if item.lower().startswith('owner:'):
                                         continue
-                                    if ':' in item:
-                                        parts = item.split(':')
-                                        if len(parts) >= 2:
-                                            results.append({
-                                                'type': 'credential',
-                                                'username': parts[0].strip(),
-                                                'password': ':'.join(parts[1:]).strip()
-                                            })
-                                    else:
-                                        results.append({'type': 'text', 'value': item})
+                                    if item.startswith('Username:'):
+                                        current['username'] = item.replace('Username:', '').strip()
+                                    elif item.startswith('Pass:'):
+                                        current['password'] = item.replace('Pass:', '').strip()
+                                    elif item.startswith('Url:'):
+                                        current['url'] = item.replace('Url:', '').strip()
+                                    
+                                    if current.get('username') and current.get('password'):
+                                        results.append({
+                                            'username': current['username'],
+                                            'password': current['password'],
+                                            'url': current.get('url', '')
+                                        })
+                                        current = {}
                             if results:
                                 random.shuffle(results)
                                 return {'status': 'success', 'data': results[:20]}
@@ -404,14 +420,10 @@ def call_api(url=None):
                 pass
             
             # টেক্সট পার্স
-            all_data = extract_all_data(content)
-            if all_data:
-                credentials = [d for d in all_data if d.get('type') == 'credential']
-                if credentials:
-                    random.shuffle(credentials)
-                    return {'status': 'success', 'data': credentials[:20]}
-                else:
-                    return {'status': 'success', 'data': all_data[:20]}
+            credentials = extract_credentials(content)
+            if credentials:
+                random.shuffle(credentials)
+                return {'status': 'success', 'data': credentials[:20]}
             else:
                 return {'status': 'error', 'message': 'কোন ডেটা পাওয়া যায়নি', 'data': []}
         else:
@@ -746,15 +758,11 @@ def handle_text(message):
                     response = f"{EMOJI['latest']} <b>লেটেস্ট ডেটা:</b>\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            if item.get('type') == 'credential':
-                                if item.get('url'):
-                                    response += f"{i}. <b>URL:</b> {item['url']}\n"
-                                response += f"   <b>Username:</b> {item['username']}\n"
-                                response += f"   <b>Password:</b> {item['password']}\n\n"
-                            elif item.get('type') == 'url':
-                                response += f"{i}. <b>URL:</b> {item['value']}\n\n"
-                            else:
-                                response += f"{i}. {item.get('value', '')}\n\n"
+                            response += f"{i}. <b>Username:</b> {item['username']}\n"
+                            response += f"   <b>Password:</b> {item['password']}\n"
+                            if item.get('url'):
+                                response += f"   <b>URL:</b> {item['url']}\n"
+                            response += "\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -831,15 +839,11 @@ def handle_text(message):
                     response = f"{EMOJI['success']} সফল!\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            if item.get('type') == 'credential':
-                                if item.get('url'):
-                                    response += f"{i}. <b>URL:</b> {item['url']}\n"
-                                response += f"   <b>Username:</b> {item['username']}\n"
-                                response += f"   <b>Password:</b> {item['password']}\n\n"
-                            elif item.get('type') == 'url':
-                                response += f"{i}. <b>URL:</b> {item['value']}\n\n"
-                            else:
-                                response += f"{i}. {item.get('value', '')}\n\n"
+                            response += f"{i}. <b>Username:</b> {item['username']}\n"
+                            response += f"   <b>Password:</b> {item['password']}\n"
+                            if item.get('url'):
+                                response += f"   <b>URL:</b> {item['url']}\n"
+                            response += "\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -957,8 +961,7 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 Owner ট্যাগ বাদ দেওয়া হয়েছে")
-    print("📌 বাকি সব ডেটা দেখাবে")
+    print("📌 সঠিক ফরম্যাটে দেখাবে: Username, Password, URL")
     print(f"{'='*50}\n")
     
     try:
