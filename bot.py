@@ -304,13 +304,12 @@ def send_verification_request(message):
 def coin_display(user_id):
     return f"{EMOJI['coins']} কয়েন: {get_coins(user_id)}"
 
-# ============ ডাটা পার্সার ============
+# ============ ডাটা পার্সার - নতুন ============
 def extract_credentials(text):
-    """শুধু ইউজারনেম:পাসওয়ার্ড বের করে"""
-    credentials = []
-    
-    # লাইন দ্বারা লাইন পার্স
+    """শুধু ইউজারনেম:পাসওয়ার্ড বের করে - গোছানো ফরম্যাটে"""
     lines = text.split('\n')
+    credentials = []
+    current_url = None
     
     for line in lines:
         if len(credentials) >= 10:
@@ -320,31 +319,34 @@ def extract_credentials(text):
         if not line:
             continue
         
+        # URL চেক
+        if line.startswith('http://') or line.startswith('https://'):
+            current_url = line
+            continue
+        
         # "Owner:" বাদ
         if line.lower().startswith('owner:'):
             continue
         
-        # ইউজারনেম:পাসওয়ার্ড খোঁজা
+        # ইউজারনেম:পাসওয়ার্ড ফরম্যাট
         if ':' in line:
-            # লাইনটি split করি
             parts = line.split(':')
             if len(parts) >= 2:
                 username = parts[0].strip()
                 password = ':'.join(parts[1:]).strip()
                 
-                # ফিল্টার
-                if username and password:
-                    # বাদ দেওয়ার লিস্ট
-                    skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email']
-                    if username.lower() in skip_words:
-                        continue
-                    
-                    # ভালো ইউজারনেম চেক
-                    if len(username) > 2 and len(password) > 1:
-                        credentials.append({
-                            'username': username,
-                            'password': password
-                        })
+                # ফিল্টার - বাদ দেওয়ার লিস্ট
+                skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email', 'https', 'http']
+                if username.lower() in skip_words:
+                    continue
+                
+                if username and password and len(username) > 1 and len(password) > 1:
+                    credentials.append({
+                        'url': current_url if current_url else '',
+                        'username': username,
+                        'password': password
+                    })
+                    current_url = None  # রিসেট
     
     return credentials
 
@@ -377,21 +379,27 @@ def call_api(url=None):
                     results = data.get('data', [])
                     if results:
                         credentials = []
+                        current_url = None
                         for item in results:
                             if len(credentials) >= 10:
                                 break
-                            if isinstance(item, str) and ':' in item:
-                                parts = item.split(':')
-                                if len(parts) >= 2:
-                                    username = parts[0].strip()
-                                    password = ':'.join(parts[1:]).strip()
-                                    if username and password:
+                            if isinstance(item, str):
+                                if item.startswith('http://') or item.startswith('https://'):
+                                    current_url = item
+                                    continue
+                                if ':' in item:
+                                    parts = item.split(':')
+                                    if len(parts) >= 2:
+                                        username = parts[0].strip()
+                                        password = ':'.join(parts[1:]).strip()
                                         skip_words = ['pass', 'url', 'username', 'user', 'login', 'id', 'name', 'password', 'email']
-                                        if username.lower() not in skip_words:
+                                        if username.lower() not in skip_words and username and password:
                                             credentials.append({
+                                                'url': current_url if current_url else '',
                                                 'username': username,
                                                 'password': password
                                             })
+                                            current_url = None
                         if credentials:
                             random.shuffle(credentials)
                             return {'status': 'success', 'data': credentials}
@@ -683,7 +691,7 @@ def handle_text(message):
     if text == f"{EMOJI['search']} সার্চ করুন":
         bot.reply_to(message, 
             f"{EMOJI['search']} <b>ইউআরএল দিন</b>\n\n"
-            f"যে ইউআরএল থেকে ইউজারনেম:পাসওয়ার্ড আনতে চান সেটি পাঠান।\n\n"
+            f"যে ইউআরএল থেকে ডেটা আনতে চান সেটি পাঠান।\n\n"
             f"<code>https://www.example.com</code>\n\n"
             f"{coin_display(user_id)}",
             parse_mode='HTML', reply_markup=get_permanent_keyboard(user_id))
@@ -737,10 +745,13 @@ def handle_text(message):
             if data and data.get('status') == 'success':
                 results = data.get('data', [])
                 if results:
-                    response = f"{EMOJI['latest']} <b>লেটেস্ট ইউজারনেম:পাসওয়ার্ড:</b>\n\n"
+                    response = f"{EMOJI['latest']} <b>লেটেস্ট ডেটা:</b>\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            response += f"{i}. <b>Username:</b> {item['username']}\n   <b>Password:</b> {item['password']}\n\n"
+                            if item.get('url'):
+                                response += f"{i}. <b>URL:</b> {item['url']}\n"
+                            response += f"   <b>Username:</b> {item['username']}\n"
+                            response += f"   <b>Password:</b> {item['password']}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -817,7 +828,10 @@ def handle_text(message):
                     response = f"{EMOJI['success']} সফল!\n\n"
                     for i, item in enumerate(results, 1):
                         if isinstance(item, dict):
-                            response += f"{i}. <b>Username:</b> {item['username']}\n   <b>Password:</b> {item['password']}\n\n"
+                            if item.get('url'):
+                                response += f"{i}. <b>URL:</b> {item['url']}\n"
+                            response += f"   <b>Username:</b> {item['username']}\n"
+                            response += f"   <b>Password:</b> {item['password']}\n\n"
                         else:
                             response += f"{i}. {item}\n"
                     response += f"\n📊 মোট {len(results)}টি পাওয়া গেছে\n{coin_display(user_id)}"
@@ -874,7 +888,7 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "🔍 ইউআরএল দিন!")
         bot.send_message(user_id, 
             f"{EMOJI['search']} <b>ইউআরএল দিন</b>\n\n"
-            f"যে ইউআরএল থেকে ইউজারনেম:পাসওয়ার্ড আনতে চান সেটি পাঠান।\n\n"
+            f"যে ইউআরএল থেকে ডেটা আনতে চান সেটি পাঠান।\n\n"
             f"{coin_display(user_id)}",
             parse_mode='HTML', reply_markup=get_permanent_keyboard(user_id))
     
@@ -935,8 +949,8 @@ def main():
     print(f"{'='*50}")
     print("✅ বট চালু!")
     print(f"📡 API: {API_URL}")
-    print("📌 শুধু ১০টি ইউজারনেম:পাসওয়ার্ড দেখাবে")
-    print("📌 গোছানো ফরম্যাটে দেখাবে")
+    print("📌 শুধু ১০টি ডেটা দেখাবে")
+    print("📌 গোছানো ফরম্যাটে: URL, Username, Password")
     print(f"{'='*50}\n")
     
     try:
